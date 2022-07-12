@@ -1,0 +1,619 @@
+import warnings
+warnings.filterwarnings('ignore')
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from tensorflow import keras
+from tensorflow.keras import layers
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import GridSearchCV
+from sklearn import neighbors
+from keras.models import load_model
+from keras.models import Sequential
+import tensorflow as tf
+from keras.callbacks import ModelCheckpoint
+from sklearn.metrics import confusion_matrix
+from pyswarms.utils.plotters import (plot_cost_history, plot_contour, plot_surface)
+import pyswarms as ps
+
+dados = pd.read_csv("Dados_Completos.csv", sep = ';')
+X = dados.iloc[:, 0:11].values
+dados.sample(4)
+
+Predictors=['Ly_Lx','W1','W2','H','h','Pi','Ff']
+TargetVariable=['Dif_Lx','Dif_Ly']
+
+X=dados[Predictors].values
+y=dados[TargetVariable].values
+
+w1_min = (30-np.mean(X[:,1]))/np.std(X[:,1])
+w1_max = (275-np.mean(X[:,1]))/np.std(X[:,1])
+w2_min = (30-np.mean(X[:,2]))/np.std(X[:,2])
+w2_max = (275-np.mean(X[:,2]))/np.std(X[:,2])
+H_min = (150-np.mean(X[:,3]))/np.std(X[:,3])
+H_max = (550-np.mean(X[:,3]))/np.std(X[:,3])
+h_min = (15-np.mean(X[:,4]))/np.std(X[:,4])
+h_max = (385-np.mean(X[:,4]))/np.std(X[:,4])
+                                     
+PredictorScaler=StandardScaler()
+TargetVarScaler=StandardScaler()
+ 
+# Storing the fit object for later reference
+PredictorScalerFit=PredictorScaler.fit(X)
+TargetVarScalerFit=TargetVarScaler.fit(y)
+ 
+# Generating the standardized values of X and y
+X=PredictorScalerFit.transform(X)
+y=TargetVarScalerFit.transform(y)
+
+# Split the data into training and testing set
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=42)
+
+def rede_neuronal():
+    model = keras.Sequential([
+        layers.Dense(64,input_dim=7, activation="relu"),
+        layers.Dense(64, activation="relu"),
+        layers.Dense(2)])
+    model.compile(optimizer='adam', loss="mse", metrics=["mae"])
+    return model
+    
+model = rede_neuronal()
+hist = model.fit(X_train,y_train, validation_data=(X_test, y_test), epochs=300, batch_size=16, verbose=0)
+
+loss = hist.history['loss'][2:]
+val_loss = hist.history['val_loss'][2:]
+epochs = range(1, len(loss) + 1)
+
+plt.plot(figsize=(7,4))
+plt.plot(epochs, loss, 'b', label='Treino')
+plt.plot(epochs, val_loss, ':', label='Validação')
+plt.title('Treino e Validação')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend(loc='upper right')
+plt.show()
+
+loss = hist.history['loss'][:]
+val_loss = hist.history['val_loss'][:]
+epochs = range(1, len(loss) + 1)
+
+
+plt.plot(figsize=(7,4))
+plt.plot(epochs, loss, 'b', label='Treino')
+plt.plot(epochs, val_loss, ':', label='Validação')
+plt.title('Treino e Validação')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend(loc='upper right')
+plt.show()
+
+## Rede Neuronal ##
+#defining the path to store the weights
+
+filepath="modelo_rede.hdf5"
+checkpoint = ModelCheckpoint(filepath, monitor='val_loss', verbose=0, save_best_only=True, mode='min')
+
+# defining checkpointing variable
+callbacks_list = [checkpoint]
+
+model = rede_neuronal()
+model.fit(X_train, y_train, epochs=55, batch_size=16, callbacks=callbacks_list, verbose=0)
+
+# loading the best model
+model.load_weights("modelo_rede.hdf5")
+test_mse_score, test_mae_score = model.evaluate(X_test, y_test)
+y_pred= model.predict(X_test)
+
+#print(y_pred)
+
+#new_inputs=np.array([[4,220.668,149.406,444,156.288,34170000,-2952288]]) ##defeituosos em lx e ly  3.13E-05   4.98E-05
+#new_inputs=np.array([[ 4,30.13,32.7, 444,203.7,34170000,-2952288]])
+new_inputs=np.array([[4.16,131.66,111.911,454,304.18,69870000,-6278238.72]]) ##2.33E-05 5.26E-05
+
+new_inputs=PredictorScalerFit.transform(new_inputs)
+print(new_inputs)
+y_new = model.predict(new_inputs)
+print(y_new)
+y_new=TargetVarScalerFit.inverse_transform(y_new) 
+print(y_new)
+
+
+## Random Forest ##
+
+parameters = {'n_estimators':[150,200,250,300,350,400,450]}
+
+model1 =RandomForestRegressor(random_state = 42)
+model1 = GridSearchCV(estimator=model1,param_grid=parameters, scoring='r2',refit=True, cv=5)
+model1.fit(X_train, y_train)
+y_pred1=model1.predict(X_test)
+
+print(model1.best_params_)
+print(model1.best_score_)
+
+## KNN ##
+
+parameters = {'n_neighbors': range(1,30,1), \
+             'weights':['uniform','distance'], \
+             'algorithm': ['ball_tree', 'kd_tree', 'brute'],\
+             'leaf_size':[1, 2, 5, 10,30]}
+
+model2 = neighbors.KNeighborsRegressor()
+model2 = GridSearchCV(estimator=model2,param_grid=parameters, scoring='r2',refit=True, cv=5)
+model2.fit(X_train, y_train)
+y_pred2=model2.predict(X_test)
+print (model2.best_params_)
+print (model2.best_score_)
+
+def grafico_Lx(X_test,y_test,y_pred,modelo,nome):
+
+    # TestingData --> data frame  dos dados de teste para Lx 
+
+    
+    ###########TESTE############
+    y_pred =TargetVarScalerFit.inverse_transform(y_pred) ## valores previstos (não standardizados) Lx
+    y_test_=TargetVarScalerFit.inverse_transform(y_test)   ## valores originais (da amostra de teste) (não standardizados) Lx
+    Test_Data=PredictorScalerFit.inverse_transform(X_test) ## valores originais (não estão standardizados) X
+    TestingData=pd.DataFrame(data=Test_Data, columns=Predictors)
+
+    TestingData.insert(7, "Dif_Lx_test", y_test_[:,0],True) ## originais da amostra de teste Lx
+    TestingData.insert(8, "Dif_Lx_prev", y_pred[:,0],True)  ## previstos pela rede (teste) Lx
+
+    
+    defeituosos_ori_x=[]
+    defeituosos_prev_x=[]
+    lista_lx=[]
+    lista_lx_critico =[]
+    l=[]
+    for i in range (len(TestingData)):
+        num=0.00003
+        l.append(num)
+
+    for i in range (len(TestingData)):
+        num=1
+        if TestingData['Dif_Lx_test'][i]>=0.00003:
+            defeituosos_ori_x.append(num)
+            
+        if TestingData['Dif_Lx_prev'][i]>=0.00003:
+            defeituosos_prev_x.append(num)
+
+        if (TestingData['Dif_Lx_test'][i]>=0.00003 and TestingData['Dif_Lx_prev'][i]<0.00003) or\
+        (TestingData['Dif_Lx_test'][i]<0.00003 and TestingData['Dif_Lx_prev'][i]>=0.00003):
+            num=1
+            lista_lx.append(num) ## lista de defeituosos
+            
+        if TestingData['Dif_Lx_test'][i]>=0.00003 and TestingData['Dif_Lx_prev'][i]<0.00003:
+            num=1
+            lista_lx_critico.append(num) ## lista de defeituoso criticos
+        
+    
+    plt.subplots(figsize=(7,4)) 
+    plt.subplot(1, 1, 1)
+    plt.title(nome)
+    plt.rcParams.update({'font.size': 13})
+    plt.plot(TestingData['Dif_Lx_test'],  color="dodgerblue",label='Valores Reais') ##valore_reais_teste lx
+    plt.plot(TestingData['Dif_Lx_prev'],color="salmon",label='Valores Previstos') ## valores_previstos_teste lx
+    plt.legend(loc='upper left')
+    plt.show()
+    plt.subplots(figsize=(7,4)) 
+    plt.subplot(1, 1, 1)
+    plt.title(nome)
+    plt.scatter(TestingData['Dif_Lx_test'], TestingData['Dif_Lx_prev'], color="grey",s=10,label='Discrepância entre os valores reais e previstos') ##teste/prev
+    plt.plot(TestingData['Dif_Lx_test'],TestingData['Dif_Lx_test'], color="dodgerblue",label='Valores Reais') ### originais
+    plt.legend(loc='upper left')
+    plt.show()
+    plt.subplots(figsize=(7,4)) 
+    plt.subplot(1, 1, 1)
+    plt.title(nome)
+    plt.scatter(range(len(TestingData)),TestingData['Dif_Lx_test'],color="dodgerblue",label='Valores Reais',s=15)##valore_reais_teste ly
+    plt.scatter(range(len(TestingData)),TestingData['Dif_Lx_prev'],color="salmon",label='Valores Previstos',s=15) ## valores_previstos_teste ly
+    plt.plot(range(len(TestingData)),l, color='black',label='Valor de referência')
+    plt.legend(loc='upper left')
+    plt.show()
+    
+    class_lx = print(nome,': Peças plásticas mal classificadas em Lx->',round(sum(lista_lx)/len(TestingData)*100,3), '% que corresponde a',sum(lista_lx), 'peças')
+    class_lx_critico = print(nome,': Peças plásticas mal classificadas em Lx crítico ->',\
+                             round(sum(lista_lx_critico)/len(TestingData)*100,3), '%  que corresponde a ',sum(lista_lx_critico),'peças' )
+
+    return plt.show(),class_lx, class_lx_critico
+    
+ def grafico_Ly(X_test,y_test,y_pred,modelo,nome):
+
+    #############TESTE###############
+    
+    y_pred =TargetVarScalerFit.inverse_transform(y_pred)
+    y_test_=TargetVarScalerFit.inverse_transform(y_test)
+    Test_Data2=PredictorScalerFit.inverse_transform(X_test)
+    TestingData2=pd.DataFrame(data=Test_Data2, columns=Predictors)
+
+    TestingData2.insert(7, "Dif_Ly_test", y_test_[:,1],True)
+    TestingData2.insert(8, "Dif_Ly_prev", y_pred[:,1],True)
+    
+    defeituosos_ori_y=[]
+    defeituosos_test_y=[]
+    lista_ly=[]
+    lista_ly_critico=[]
+    l=[]
+    for i in range (len(TestingData2)):
+        num=0.00003
+        l.append(num)
+
+    for i in range (len(TestingData2)):
+        num=1
+        if TestingData2['Dif_Ly_test'][i]>=0.00003:
+            defeituosos_ori_y.append(num)
+            
+        if TestingData2['Dif_Ly_prev'][i]>=0.00003:
+            defeituosos_test_y.append(num)
+
+        if (TestingData2['Dif_Ly_test'][i]>=0.00003 and TestingData2['Dif_Ly_prev'][i]<0.00003) or\
+        (TestingData2['Dif_Ly_test'][i]<0.00003 and TestingData2['Dif_Ly_prev'][i]>=0.00003):
+            lista_ly.append(num)
+            
+        if TestingData2['Dif_Ly_test'][i]>=0.00003 and TestingData2['Dif_Ly_prev'][i]<0.00003:
+            lista_ly_critico.append(num)
+        
+    plt.subplots(figsize=(7,4)) 
+    plt.subplot(1, 1, 1)
+    plt.title(nome)
+    plt.rcParams.update({'font.size': 13})
+    plt.plot(TestingData2['Dif_Ly_test'],  color="dodgerblue",label='Valores Reais') ##valore_reais_teste lx
+    plt.plot(TestingData2['Dif_Ly_prev'],color="salmon",label='Valores Previstos') ## valores_previstos_teste lx
+    plt.legend(loc='upper left')
+    plt.yticks([0,0.00002,0.00004,0.00006,0.00008,0.00010,0.00012,0.00014,0.00016]) 
+    plt.show()
+    plt.subplots(figsize=(7,4)) 
+    plt.subplot(1, 1, 1)
+    plt.title(nome)
+    plt.scatter(TestingData2['Dif_Ly_test'], TestingData2['Dif_Ly_prev'], color="grey",s=10,label='Discrepância entre os valores reais e previstos') ##teste/prev
+    plt.plot(TestingData2['Dif_Ly_test'],TestingData2['Dif_Ly_test'], color="dodgerblue",label='Valores Reais') ### originais
+    plt.legend(loc='upper left')
+    plt.xticks([0,0.00004,0.00008,0.00012,0.00016]) 
+    plt.yticks([0,0.00002,0.00004,0.00006,0.00008,0.00010,0.00012,0.00014,0.00016]) 
+    plt.show()
+    plt.subplots(figsize=(7,4)) 
+    plt.subplot(1, 1, 1)
+    plt.title(nome)
+    plt.scatter(range(len(TestingData2)),TestingData2['Dif_Ly_test'],color="dodgerblue",label='Valores Reais',s=15)##valore_reais_teste ly
+    plt.scatter(range(len(TestingData2)),TestingData2['Dif_Ly_prev'],color="salmon",label='Valores Previstos',s=15) ## valores_previstos_teste ly
+    plt.plot(range(len(TestingData2)),l, color='black',label='Valor de referência')
+    plt.legend(loc='upper left')
+    plt.yticks([0,0.00002,0.00004,0.00006,0.00008,0.00010,0.00012,0.00014,0.00016])
+    plt.show()
+    
+    class_ly = print(nome,': Peças plásticas mal classificadas em Ly->',round(sum(lista_ly)/len(TestingData2)*100,3), '% que corresponde a',sum(lista_ly), 'peças')
+    class_ly_critico = print(nome,': Peças plásticas mal classificadas em Ly crítico ->',\
+                             round(sum(lista_ly_critico)/len(TestingData2)*100,3), '%  que corresponde a ',sum(lista_ly_critico),'peças' )
+    print()
+    return plt.show(), class_ly, class_ly_critico
+    
+nome = 'Rede Neuronal dif_Lx'
+grafico_Lx(X_test,y_test,y_pred,model,nome)
+
+nome1 = 'Random Forest dif_Lx'
+grafico_Lx(X_test,y_test,y_pred1,model1,nome1)
+
+nome2 = 'KNN dif_Lx'
+grafico_Lx(X_test,y_test,y_pred2,model2,nome2)
+
+nome = 'Rede Neuronal dif_Ly'
+grafico_Ly(X_test,y_test,y_pred,model,nome)
+
+nome1 = 'Random Forest dif_Ly'
+grafico_Ly(X_test,y_test,y_pred1,model1,nome1)
+
+nome2 = 'KNN dif_Ly'
+grafico_Ly(X_test,y_test,y_pred2,model2,nome2)
+
+import seaborn as sns
+
+def matriz_confusao(y_pred,X_test,y_test):
+    y_pred_difx=[]
+    y_pred_dify=[]
+    y_test_difx=[]
+    y_test_dify=[]
+    
+    y_pred =TargetVarScalerFit.inverse_transform(y_pred)
+    y_test=TargetVarScalerFit.inverse_transform(y_test)
+    
+    for i in range (len(y_pred)):
+        if y_pred[i][0]>=0.00003:
+            num = 1
+        else:
+            num= 0
+        y_pred_difx.append(num)
+
+        if y_pred[i][1]>=0.00003:
+            num = 1
+        else:
+            num=0
+        y_pred_dify.append(num)
+    
+    for i in range (len(y_test)):
+        if y_test[i][0]>=0.00003:
+            num = 1
+        else:
+            num= 0
+        y_test_difx.append(num)
+
+        if y_test[i][1]>=0.00003:
+            num = 1
+        else:
+            num=0
+        y_test_dify.append(num)
+    
+
+    Test_Data3=PredictorScalerFit.inverse_transform(X_test)
+    TestingData3=pd.DataFrame(data=Test_Data3, columns=Predictors)
+    
+
+    TestingData3.insert(7, "class_pecas_Lx_test", y_test_difx,True)
+    TestingData3.insert(8, "class_pecas_Lx_prev", y_pred_difx,True)
+    TestingData3.insert(9, "class_pecas_Ly_test", y_test_dify,True)
+    TestingData3.insert(10, "class_pecas_Ly_prev", y_pred_dify,True)
+    TestingData3.sample(4)
+    
+    matx=confusion_matrix(TestingData3['class_pecas_Lx_test'], TestingData3['class_pecas_Lx_prev'])
+    maty=confusion_matrix(TestingData3['class_pecas_Ly_test'], TestingData3['class_pecas_Ly_prev'])
+    return (matx ,maty)
+    
+    
+labels = ['Não Defeituosos', 'Defeituosos']
+
+m=matriz_confusao(y_pred,X_test,y_test)
+m1=matriz_confusao(y_pred1,X_test,y_test)
+m2=matriz_confusao(y_pred2,X_test,y_test)
+
+sns.set()
+fig, axes = plt.subplots(figsize=(10, 5))
+plt.subplot(1, 3,1)
+plt.title('Rede Neuronal')
+sns.heatmap(m[0], square=True, annot=True, fmt='d', cbar=False, cmap='Blues',xticklabels=labels, yticklabels=labels)
+plt.subplot(1, 3, 2)
+plt.title('Floresta Aleatória')
+sns.heatmap(m1[0], square=True, annot=True, fmt='d', cbar=False, cmap='Blues',xticklabels=labels, yticklabels=labels)
+plt.subplot(1, 3, 3)
+plt.title('KNN')
+sns.heatmap(m2[0], square=True, annot=True, fmt='d', cbar=False, cmap='Blues',xticklabels=labels, yticklabels=labels)
+
+sns.set()
+fig, axes = plt.subplots(figsize=(10, 5))
+plt.subplot(1, 3,1)
+plt.title('Rede Neuronal')
+sns.heatmap(m[1], square=True, annot=True, fmt='d', cbar=False, cmap='Blues',xticklabels=labels, yticklabels=labels)
+plt.subplot(1, 3, 2)
+plt.title('Floresta Aleatória')
+sns.heatmap(m1[1], square=True, annot=True, fmt='d', cbar=False, cmap='Blues',xticklabels=labels, yticklabels=labels)
+plt.subplot(1, 3, 3)
+plt.title('KNN')
+sns.heatmap(m2[1], square=True, annot=True, fmt='d', cbar=False, cmap='Blues',xticklabels=labels, yticklabels=labels) 
+
+def cost_function(x):
+
+    global model, ly_lx_init, H_init, pi_init, ff_init 
+    global psize, nprt, PredictorScaler, TargetVarScaler
+
+    w1 = x[:,0]
+    w2 = x[:,1]   #####ly_lx_init, H_init, pi_init, ff_init têm que estar standardizados
+    h  = x[:,2]
+    
+    xprev = np.ones((nprt,7))  ## matriz com os valores Lx/Ly, H, Pi, Ff fixos e W1,W2 e h a variar entre o min e max
+                               ## todos os valores estão standardizados
+        
+    xprev[:,0] = xprev[:,0]*ly_lx_init
+    xprev[:,1] = w1
+    xprev[:,2] = w2
+    xprev[:,3] = xprev[:,3]*H_init
+    xprev[:,4] = h
+    xprev[:,5] = xprev[:,5]*pi_init
+    xprev[:,6] = xprev[:,6]*ff_init 
+
+    
+    tst = PredictorScalerFit.inverse_transform(xprev) ### nova matriz com os valores w1_novo, w2_novo, h_novo 
+    w1_novo = tst[:,1]                                ### para realizar o calculo da função objetivo
+    w2_novo = tst[:,2]
+    h_novo  = tst[:,4]
+    
+    #print(xprev)
+    #xprev = PredictorScalerFit.transform(xprev)
+    y_prev = model.predict(xprev)                    ### realizar a previsão para utilizar na penalização
+    y_prev= TargetVarScaler.inverse_transform(y_prev)
+    
+    lista = []
+    for i in range (len(y_prev)):
+        if y_prev[i,0]  > 0.00003:
+            y_prev[i,0] = 1
+        else:
+            y_prev[i,0] = 0
+        
+        if y_prev[i,1]  > 0.00003:
+            y_prev[i,1] = 1
+        else:
+            y_prev[i,1] = 0
+        
+        
+        penalidade =  (y_prev[i,0] + y_prev[i,1])*1000000
+        f = (w1_novo[i] + w2_novo[i])*h_novo[i] + penalidade  ##função objetivo
+        
+        lista.append(f)
+
+    return lista
+
+from pyswarms.utils.plotters import (plot_cost_history, plot_contour, plot_surface)
+import pyswarms as ps
+
+
+nprt=100
+def pso (exemplo):
+    
+    global w1_min, w2_min, h_min, w1_max, w2_max, h_max, nprt
+    
+
+    x_min =[w1_min,w2_min,h_min] 
+    x_max =[w1_max,w2_max,h_max]
+
+
+    limites = (x_min,x_max)
+
+    # Initialize swarm
+    opcao = {'c1': 1.5, 'c2': 2, 'w':0.5}
+
+
+    # Call instance of PSO
+    optimizer = ps.single.GlobalBestPSO(n_particles=nprt, dimensions=3, options=opcao, bounds=limites)
+
+    # Perform optimization
+    best_cost, best_pos  = optimizer.optimize(cost_function, iters=500)
+    plot_cost_history(cost_history=optimizer.cost_history)
+    
+    ## previsão inicial
+    y_new_inicial = model.predict(exemplo)
+    y_new_inicial =TargetVarScalerFit.inverse_transform(y_new_inicial) 
+    
+    dif_lx_i1 = y_new_inicial[0][0]
+    dif_ly_i1 = y_new_inicial[0][1]   
+    
+    dif_lx_i = y_new_inicial[0][0]
+    dif_ly_i = y_new_inicial[0][1]
+    
+    if dif_lx_i >0.00003:
+        dif_lx_i = 1 
+    else:
+        dif_lx_i = 0 
+    
+    if dif_ly_i > 0.00003:
+        dif_ly_i = 1 
+    else:
+        dif_ly_i = 0 
+    
+    exemplo_inicial = PredictorScalerFit.inverse_transform(exemplo)
+    penalidade =  (dif_lx_i + dif_ly_i)*1000000
+    custo_i=(exemplo_inicial[0][1]+exemplo_inicial[0][2])*exemplo_inicial[0][4] + penalidade
+        
+    
+    ## previsão otimizado 
+    exemplo_otimizado1 = np.array([[exemplo[0][0],best_pos[0],best_pos[1],
+                                    exemplo[0][3],best_pos[2],exemplo[0][5],exemplo[0][6]]])
+    
+    exemplo_otimizado = PredictorScalerFit.inverse_transform(exemplo_otimizado1) ## serve para calcular o custo
+    
+    #print(exemplo_otimizado)
+    y_new_otimizado = model.predict(exemplo_otimizado1)
+    y_new_otimizado =TargetVarScalerFit.inverse_transform(y_new_otimizado) 
+    #print("X=%s, Predicted=%s" % (exemplo_otimizado, y_new_otimizado))
+    
+    dif_lx_o = y_new_otimizado[0][0]
+    dif_ly_o = y_new_otimizado[0][1]
+    
+    if dif_lx_o >0.00003:
+        dif_lx_o = 1 
+    else:
+        dif_lx_o = 0 
+    
+    if dif_ly_o > 0.00003:
+        dif_ly_o = 1 
+    else:
+        dif_ly_o = 0 
+    
+    penalidade =  (dif_lx_o + dif_ly_o)*1000000
+    custo_o=(exemplo_otimizado[0][1]+exemplo_otimizado[0][2])*exemplo_otimizado[0][4] + penalidade
+        
+    
+    w1_o = exemplo_otimizado[0][1]
+    w2_o = exemplo_otimizado[0][2]
+    h_o  = exemplo_otimizado[0][4]
+    dif_lx_o = y_new_otimizado[0][0]
+    dif_ly_o = y_new_otimizado[0][1]
+    
+    v_w1 = round((exemplo_inicial[0][1] - w1_o)/  exemplo_inicial[0][1] *100,3)
+    v_w2 = round((exemplo_inicial[0][2] - w2_o)/  exemplo_inicial[0][2] *100,3)
+    v_h = round((exemplo_inicial[0][4] - h_o)/  exemplo_inicial[0][4] *100,3)
+    
+    print(bold_color.BOLD +'                                        Exemplo                            '+ bold_color.END)
+    print('------------------------------------------------------------------------------------')
+    print(bold_color.BOLD +'Ly/Lx \t   W1 \t   W2 \t   H \t   h \t Pi \t   Ff  '+ bold_color.END)
+    print('%s \t %s' %(exemplo_inicial[0][0],exemplo_inicial[0][1]) ,'%s %s' %(exemplo_inicial[0][2],exemplo_inicial[0][3]),'%s %s' %(exemplo_inicial[0][4],exemplo_inicial[0][5]),'%s \t' %(exemplo_inicial[0][6]))
+    
+    print('')
+    
+    print(bold_color.BOLD +'                             Resultados do Método PSO                          '+ bold_color.END)
+    print('------------------------------------------------------------------------------------')
+    print(bold_color.BOLD +'\t  Valores iniciais \t\tValores Otimizados \t%Redução '+ bold_color.END)
+    print('------------------------------------------------------------------------------------')
+    print('W1 \t  %s\t\t\t%f'  %(round(exemplo_inicial[0][1],3),round(w1_o,3)),'\t\t%s' %(v_w1))
+    print('W2 \t  %s\t\t\t%f'  %(round(exemplo_inicial[0][2],3),round(w2_o,3)),'\t\t%s' %(v_w2))
+    print('h \t  %s\t\t\t%f'  %(round(exemplo_inicial[0][4],3),round(h_o,3)),'\t\t%s' %(v_h))
+    print('Custo \t  %s\t\t\t%f' %(round(custo_i,3),round(custo_o,3)))
+    print('------------------------------------------------------------------------------------')
+    print(bold_color.BOLD +'\t  Dif_Lx_i \tDif_Ly_i \t\tDif_Lx_o \t\tDif_Ly_o ' + bold_color.END)
+    print('Previsão  %s %s' %(dif_lx_i1,dif_ly_i1) ,'\t%s \t%s' %(dif_lx_o,dif_ly_o))
+    print('------------------------------------------------------------------------------------')
+    return plt.show()
+    
+exemplo1=np.array([[4,220.668,149.406,444,156.288,34170000,-2952288]]) # 3.13E-05   4.98E-05
+exemplo2=np.array([[2.32 , 180.124,  135.436 , 392.0 ,  88.592 , 52650000.0 ,-2638396.80]]) #4.71E-05   5.88E-05
+exemplo3=np.array([[1.82,117.198,83.691,306,214.2,66300000,-2606385.6]]) # 2.34E-05  3.07E-05
+exemplo4=np.array([[2.58,58.716,60.228,252,64.512,57900000,-3226651.2]]) # 9.94E-06   3.03E-05
+exemplo5=np.array([[1,192.5,275,550,220,39000000,-842400]])  # 4.00E-05 4.00E-05
+exemplo6=np.array([[2.46,183.752,106.502,412,177.16,54120000,-2875720.32]]) # 3.59E-05 4.63E-05
+exemplo7=np.array([[1,192.5,110,550,220,39000000,-842400]])  # 2.25E-05 2.25E-05
+exemplo8=np.array([[2.3,217.384,217.384,464,216.224,58950000,-2928636]]) #7.26E-05 8.43E-05
+
+
+exemplo1=PredictorScalerFit.transform(exemplo1)
+ly_lx_init = exemplo1[0][0]
+H_init = exemplo1[0][3]
+pi_init =exemplo1[0][5]
+ff_init =exemplo1[0][6]
+pso(exemplo1)
+
+exemplo2=PredictorScalerFit.transform(exemplo2)
+ly_lx_init = exemplo2[0][0]
+H_init = exemplo2[0][3]
+pi_init =exemplo2[0][5]
+ff_init =exemplo2[0][6]
+pso(exemplo2)
+
+exemplo3=PredictorScalerFit.transform(exemplo3)
+ly_lx_init = exemplo3[0][0]
+H_init = exemplo3[0][3]
+pi_init =exemplo3[0][5]
+ff_init =exemplo3[0][6]
+pso(exemplo3)
+
+exemplo4=PredictorScalerFit.transform(exemplo4)
+ly_lx_init = exemplo4[0][0] 
+H_init = exemplo4[0][3]
+pi_init =exemplo4[0][5]
+ff_init =exemplo4[0][6]
+pso(exemplo4)
+
+exemplo5=PredictorScalerFit.transform(exemplo5)
+ly_lx_init = exemplo5[0][0] ### bom exemplo
+H_init = exemplo5[0][3]
+pi_init =exemplo5[0][5]
+ff_init =exemplo5[0][6]
+pso(exemplo5)
+
+exemplo6=PredictorScalerFit.transform(exemplo6)
+ly_lx_init = exemplo6[0][0]
+H_init = exemplo6[0][3]
+pi_init =exemplo6[0][5]
+ff_init =exemplo6[0][6]
+pso(exemplo6)
+
+exemplo7=PredictorScalerFit.transform(exemplo7)
+ly_lx_init = exemplo7[0][0]
+H_init = exemplo7[0][3]
+pi_init =exemplo7[0][5]
+ff_init =exemplo7[0][6]
+pso(exemplo7)
+
+
+exemplo8=PredictorScalerFit.transform(exemplo8)
+ly_lx_init = exemplo8[0][0]
+H_init = exemplo8[0][3]
+pi_init =exemplo8[0][5]
+ff_init =exemplo8[0][6]
+pso(exemplo8)
