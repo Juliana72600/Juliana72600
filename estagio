@@ -90,8 +90,6 @@ plt.legend(loc='upper right')
 plt.show()
 
 ## Rede Neuronal ##
-#defining the path to store the weights
-
 filepath="modelo_rede.hdf5"
 checkpoint = ModelCheckpoint(filepath, monitor='val_loss', verbose=0, save_best_only=True, mode='min')
 
@@ -105,20 +103,6 @@ model.fit(X_train, y_train, epochs=55, batch_size=16, callbacks=callbacks_list, 
 model.load_weights("modelo_rede.hdf5")
 test_mse_score, test_mae_score = model.evaluate(X_test, y_test)
 y_pred= model.predict(X_test)
-
-#print(y_pred)
-
-#new_inputs=np.array([[4,220.668,149.406,444,156.288,34170000,-2952288]]) ##defeituosos em lx e ly  3.13E-05   4.98E-05
-#new_inputs=np.array([[ 4,30.13,32.7, 444,203.7,34170000,-2952288]])
-new_inputs=np.array([[4.16,131.66,111.911,454,304.18,69870000,-6278238.72]]) ##2.33E-05 5.26E-05
-
-new_inputs=PredictorScalerFit.transform(new_inputs)
-print(new_inputs)
-y_new = model.predict(new_inputs)
-print(y_new)
-y_new=TargetVarScalerFit.inverse_transform(y_new) 
-print(y_new)
-
 
 ## Random Forest ##
 
@@ -395,7 +379,7 @@ def cost_function(x):
     global psize, nprt, PredictorScaler, TargetVarScaler
 
     w1 = x[:,0]
-    w2 = x[:,1]   #####ly_lx_init, H_init, pi_init, ff_init têm que estar standardizados
+    w2 = x[:,1]   
     h  = x[:,2]
     
     xprev = np.ones((nprt,7))  ## matriz com os valores Lx/Ly, H, Pi, Ff fixos e W1,W2 e h a variar entre o min e max
@@ -415,9 +399,7 @@ def cost_function(x):
     w2_novo = tst[:,2]
     h_novo  = tst[:,4]
     
-    #print(xprev)
-    #xprev = PredictorScalerFit.transform(xprev)
-    y_prev = model.predict(xprev)                    ### realizar a previsão para utilizar na penalização
+    y_prev = model.predict(xprev)                    ### Previsão para utilizar na penalização
     y_prev= TargetVarScaler.inverse_transform(y_prev)
     
     lista = []
@@ -498,10 +480,8 @@ def pso (exemplo):
     
     exemplo_otimizado = PredictorScalerFit.inverse_transform(exemplo_otimizado1) ## serve para calcular o custo
     
-    #print(exemplo_otimizado)
     y_new_otimizado = model.predict(exemplo_otimizado1)
     y_new_otimizado =TargetVarScalerFit.inverse_transform(y_new_otimizado) 
-    #print("X=%s, Predicted=%s" % (exemplo_otimizado, y_new_otimizado))
     
     dif_lx_o = y_new_otimizado[0][0]
     dif_ly_o = y_new_otimizado[0][1]
